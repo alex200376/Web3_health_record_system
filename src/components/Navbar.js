@@ -22,8 +22,8 @@ const Navbar = () => {
   }
 
   const handleDisconnect = () => {
-    disconnect();
-    navigate('/');
+    disconnect();  // Call the disconnect function from context
+    navigate('/');  // Navigate to home page after disconnecting
   };
 
   return (

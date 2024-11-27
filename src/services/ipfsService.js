@@ -11,9 +11,9 @@ const ipfs = create({
   protocol: 'http',
 });
 
-export const uploadToIPFS = async (data) => {
+export const uploadToIPFS = async (data, isBinary = false) => {
   try {
-    const buffer = Buffer.from(JSON.stringify(data));
+    const buffer = isBinary ? Buffer.from(data) : Buffer.from(JSON.stringify(data));
     const result = await ipfs.add(buffer);
     return result.path;
   } catch (error) {
@@ -22,7 +22,7 @@ export const uploadToIPFS = async (data) => {
   }
 };
 
-export const getFromIPFS = async (hash) => {
+export const getFromIPFS = async (hash, isBinary = false) => {
   try {
     const stream = ipfs.cat(hash);
     const chunks = [];
@@ -30,6 +30,11 @@ export const getFromIPFS = async (hash) => {
       chunks.push(chunk);
     }
     const buffer = Buffer.concat(chunks);
+    
+    if (isBinary) {
+      return buffer;
+    }
+    
     const data = buffer.toString();
     return JSON.parse(data);
   } catch (error) {

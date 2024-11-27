@@ -9,6 +9,7 @@ import AdminDashboard from './components/AdminDashboard';
 import DoctorDashboard from './components/DoctorDashboard';
 import PatientDashboard from './components/PatientDashboard';
 import Navbar from './components/Navbar';
+import Help from './components/Help';
 import { useWeb3Context } from './context/Web3Context';
 
 const theme = createTheme({
@@ -74,6 +75,7 @@ function App() {
                 </PrivateRoute>
               }
             />
+            <Route path="/help" element={<Help />} />
           </Routes>
         </Router>
       </Web3Provider>

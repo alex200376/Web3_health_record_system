@@ -27,8 +27,11 @@ import {
   Tabs,
   Tab,
   Tooltip,
+  Menu,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
-import { CloudUpload, Delete, Download } from '@mui/icons-material';
+import { CloudUpload, Delete, Download, Description, FolderOpen } from '@mui/icons-material';
 import { useWeb3Context } from '../context/Web3Context';
 import { uploadToIPFS, getFromIPFS } from '../services/ipfsService';
 import { styled } from '@mui/material/styles';
@@ -65,6 +68,8 @@ const AdminDashboard = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [tabValue, setTabValue] = useState(0);
   const [isDefaultAdmin, setIsDefaultAdmin] = useState(false);
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [selectedUserDocs, setSelectedUserDocs] = useState(null);
 
   const DEFAULT_ADMIN = '0xD9073E73717FCA172f29B55A0368ae41De35D237';
 
@@ -81,7 +86,7 @@ const AdminDashboard = () => {
   const [newUser, setNewUser] = useState({
     address: '',
     name: '',
-    role: '',
+    role: '0', // Set initial role to '0' for Patient
     // Common fields
     email: '',
     phone: '',
@@ -100,13 +105,29 @@ const AdminDashboard = () => {
     documents: [],
   });
 
+  // Add useEffect to handle initial role setup
+  useEffect(() => {
+    setNewUser(prev => ({
+      ...prev,
+      role: String(tabValue)
+    }));
+  }, [tabValue]);
+
   // Edit modal state
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editUser, setEditUser] = useState({
     address: '',
     name: '',
-    additionalInfo: '',
-    ipfsHash: '',
+    role: '',
+    email: '',
+    phone: '',
+    dateOfBirth: '',
+    bloodGroup: '',
+    allergies: '',
+    specialization: '',
+    licenseNumber: '',
+    hospitalAffiliation: '',
+    documents: [],
   });
 
   // Delete modal state
@@ -537,40 +558,20 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleEditSubmit = async () => {
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      // Upload updated info to IPFS
-      const ipfsHash = await uploadToIPFS({
-        additionalInfo: editUser.additionalInfo,
-        timestamp: new Date().toISOString(),
-      });
-
-      // Update user on blockchain
-      await contract.methods
-        .updateUser(editUser.address, editUser.name, ipfsHash)
-        .send({ from: account });
-
-      setSuccess('User updated successfully!');
-      setEditModalOpen(false);
-      fetchUsers();
-    } catch (err) {
-      console.error('Error updating user:', err);
-      setError(err.message || 'Error updating user. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleOpenEditModal = (user) => {
     setEditUser({
       address: user.address,
       name: user.name,
-      additionalInfo: user.additionalInfo || '',
-      ipfsHash: user.ipfsHash || '',
+      role: user.role,
+      email: user.email || '',
+      phone: user.phone || '',
+      dateOfBirth: user.dateOfBirth || '',
+      bloodGroup: user.bloodGroup || '',
+      allergies: user.allergies || '',
+      specialization: user.specialization || '',
+      licenseNumber: user.licenseNumber || '',
+      hospitalAffiliation: user.hospitalAffiliation || '',
+      documents: user.documents || [],
     });
     setEditModalOpen(true);
   };
@@ -580,9 +581,60 @@ const AdminDashboard = () => {
     setEditUser({
       address: '',
       name: '',
-      additionalInfo: '',
-      ipfsHash: '',
+      role: '',
+      email: '',
+      phone: '',
+      dateOfBirth: '',
+      bloodGroup: '',
+      allergies: '',
+      specialization: '',
+      licenseNumber: '',
+      hospitalAffiliation: '',
+      documents: [],
     });
+  };
+
+  const handleEditSubmit = async () => {
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Prepare IPFS data based on user role
+      const ipfsData = {
+        email: editUser.email,
+        phone: editUser.phone,
+        documents: editUser.documents,
+      };
+
+      // Add role-specific data
+      if (editUser.role === '0') { // Patient
+        ipfsData.dateOfBirth = editUser.dateOfBirth;
+        ipfsData.bloodGroup = editUser.bloodGroup;
+        ipfsData.allergies = editUser.allergies;
+      } else if (editUser.role === '1') { // Doctor
+        ipfsData.specialization = editUser.specialization;
+        ipfsData.licenseNumber = editUser.licenseNumber;
+        ipfsData.hospitalAffiliation = editUser.hospitalAffiliation;
+      }
+
+      // Upload to IPFS
+      const ipfsHash = await uploadToIPFS(JSON.stringify(ipfsData));
+
+      // Update user on blockchain
+      await contract.methods
+        .updateUser(editUser.address, editUser.name, ipfsHash)
+        .send({ from: account });
+
+      setSuccess('User updated successfully!');
+      setEditModalOpen(false);
+      fetchUsers(); // Refresh the user list
+    } catch (err) {
+      console.error('Error updating user:', err);
+      setError(err.message || 'Error updating user. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleOpenDeleteModal = (user) => {
@@ -614,9 +666,45 @@ const AdminDashboard = () => {
         throw new Error('User does not exist or is already inactive');
       }
 
-      // Attempt to delete the user
-      await contract.methods
-        .deleteUser(userToDelete.address)
+      // If deleting a patient, clean up their access states first
+      if (user.role === '0') {
+        try {
+          // Get all authorized doctors and pending requests
+          const authorizedDoctors = await contract.methods.getAuthorizedDoctors(userToDelete.address).call();
+          const pendingRequests = await contract.methods.getPendingRequests(userToDelete.address).call();
+          
+          console.log('Cleaning up access states for patient:', {
+            address: userToDelete.address,
+            authorizedDoctors,
+            pendingRequests
+          });
+
+          // Revoke access for each authorized doctor
+          for (const doctor of authorizedDoctors) {
+            try {
+              await contract.methods.revokeAccess(userToDelete.address, doctor)
+                .send({ from: account });
+            } catch (error) {
+              console.error('Error revoking access for doctor:', doctor, error);
+            }
+          }
+
+          // Clear pending requests
+          for (const doctor of pendingRequests) {
+            try {
+              await contract.methods.rejectRequest(userToDelete.address, doctor)
+                .send({ from: account });
+            } catch (error) {
+              console.error('Error rejecting request from doctor:', doctor, error);
+            }
+          }
+        } catch (error) {
+          console.error('Error cleaning up access states:', error);
+        }
+      }
+
+      // Now delete the user
+      await contract.methods.deleteUser(userToDelete.address)
         .send({ from: account });
 
       setSuccess('User deleted successfully!');
@@ -632,10 +720,13 @@ const AdminDashboard = () => {
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
-    setNewUser({
+    // Set the role value as a string matching the tab index
+    setNewUser(prev => ({
+      ...prev,
+      role: String(newValue),
+      // Reset other fields when switching tabs
       address: '',
       name: '',
-      role: String(newValue),
       email: '',
       phone: '',
       dateOfBirth: '',
@@ -647,11 +738,21 @@ const AdminDashboard = () => {
       department: '',
       adminLevel: '',
       documents: [],
-    });
+    }));
   };
 
   const getFilteredUsers = (roleValue) => {
     return users.filter(user => user.role === roleValue);
+  };
+
+  const handleOpenDocMenu = (event, userDocs) => {
+    setAnchorEl(event.currentTarget);
+    setSelectedUserDocs(userDocs);
+  };
+
+  const handleCloseDocMenu = () => {
+    setAnchorEl(null);
+    setSelectedUserDocs(null);
   };
 
   const renderUserTable = (roleValue) => {
@@ -743,19 +844,80 @@ const AdminDashboard = () => {
                       )
                     ) : column.id === 'documents' ? (
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography>{user.documents?.length || 0}</Typography>
-                        {user.documents && user.documents.length > 0 && (
-                          user.documents.map((doc, index) => (
-                            <Tooltip key={index} title={doc.name || 'Download Document'}>
-                              <IconButton
-                                size="small"
-                                onClick={() => handleDownloadDocument(doc)}
-                                color="primary"
+                        {user.documents && user.documents.length > 0 ? (
+                          <>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={(e) => handleOpenDocMenu(e, user.documents)}
+                              startIcon={<FolderOpen />}
+                              endIcon={<Typography variant="caption">({user.documents.length})</Typography>}
+                            >
+                              Documents
+                            </Button>
+                            <Menu
+                              anchorEl={anchorEl}
+                              open={Boolean(anchorEl) && selectedUserDocs === user.documents}
+                              onClose={handleCloseDocMenu}
+                              PaperProps={{
+                                elevation: 3,
+                                sx: {
+                                  maxHeight: 300,
+                                  width: '300px',
+                                }
+                              }}
+                            >
+                              <MenuItem
+                                onClick={() => {
+                                  user.documents.forEach(doc => handleDownloadDocument(doc));
+                                  handleCloseDocMenu();
+                                }}
+                                sx={{
+                                  borderBottom: '1px solid',
+                                  borderColor: 'divider',
+                                  mb: 1
+                                }}
                               >
-                                <Download />
-                              </IconButton>
-                            </Tooltip>
-                          ))
+                                <ListItemIcon>
+                                  <Download fontSize="small" />
+                                </ListItemIcon>
+                                <ListItemText>Download All</ListItemText>
+                              </MenuItem>
+                              {user.documents.map((doc, index) => (
+                                <MenuItem
+                                  key={index}
+                                  onClick={() => {
+                                    handleDownloadDocument(doc);
+                                    handleCloseDocMenu();
+                                  }}
+                                  sx={{
+                                    '&:hover': {
+                                      bgcolor: 'action.hover'
+                                    }
+                                  }}
+                                >
+                                  <ListItemIcon>
+                                    <Description fontSize="small" />
+                                  </ListItemIcon>
+                                  <ListItemText 
+                                    primary={doc.name || `Document ${index + 1}`}
+                                    secondary={`Uploaded: ${new Date(doc.uploadDate).toLocaleDateString()}`}
+                                    primaryTypographyProps={{
+                                      variant: 'body2',
+                                      noWrap: true
+                                    }}
+                                    secondaryTypographyProps={{
+                                      variant: 'caption'
+                                    }}
+                                  />
+                                </MenuItem>
+                              ))}
+                            </Menu>
+                          </>
+                        ) : (
+                          <Typography color="text.secondary" variant="body2">
+                            No documents
+                          </Typography>
                         )}
                       </Box>
                     ) : (
@@ -1006,17 +1168,97 @@ const AdminDashboard = () => {
                   required
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <TextField
                   fullWidth
-                  label="Additional Information"
-                  name="additionalInfo"
-                  value={editUser.additionalInfo}
+                  label="Email"
+                  name="email"
+                  type="email"
+                  value={editUser.email}
                   onChange={handleEditInputChange}
-                  multiline
-                  rows={4}
                 />
               </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Phone"
+                  name="phone"
+                  value={editUser.phone}
+                  onChange={handleEditInputChange}
+                />
+              </Grid>
+              {editUser.role === '0' && (
+                <>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Date of Birth"
+                      name="dateOfBirth"
+                      type="date"
+                      value={editUser.dateOfBirth}
+                      onChange={handleEditInputChange}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <FormControl fullWidth>
+                      <InputLabel>Blood Group</InputLabel>
+                      <Select
+                        name="bloodGroup"
+                        value={editUser.bloodGroup}
+                        onChange={handleEditInputChange}
+                        label="Blood Group"
+                      >
+                        {bloodGroups.map((group) => (
+                          <MenuItem key={group} value={group}>{group}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Allergies"
+                      name="allergies"
+                      multiline
+                      rows={2}
+                      value={editUser.allergies}
+                      onChange={handleEditInputChange}
+                    />
+                  </Grid>
+                </>
+              )}
+              {editUser.role === '1' && (
+                <>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="Specialization"
+                      name="specialization"
+                      value={editUser.specialization}
+                      onChange={handleEditInputChange}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      label="License Number"
+                      name="licenseNumber"
+                      value={editUser.licenseNumber}
+                      onChange={handleEditInputChange}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      fullWidth
+                      label="Hospital Affiliation"
+                      name="hospitalAffiliation"
+                      value={editUser.hospitalAffiliation}
+                      onChange={handleEditInputChange}
+                    />
+                  </Grid>
+                </>
+              )}
             </Grid>
           </Box>
         </DialogContent>
