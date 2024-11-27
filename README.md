@@ -1,70 +1,116 @@
-# Getting Started with Create React App
+# HealthChain - Blockchain Healthcare Records System
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A secure, decentralized healthcare records management system built with Ethereum blockchain and IPFS.
 
-## Available Scripts
+## Prerequisites
 
-In the project directory, you can run:
+Before you begin, ensure you have the following installed:
+- [Node.js](https://nodejs.org/) (v14 or higher)
+- [Kubo (IPFS)](https://docs.ipfs.tech/install/command-line/#install-official-binary) - For decentralized file storage
+- [Ganache](https://trufflesuite.com/ganache/) - For local blockchain development
+- [MetaMask](https://metamask.io/) browser extension
 
-### `npm start`
+## Setup Instructions
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+### 1. Start IPFS Daemon
+```bash
+# Start the IPFS daemon in a terminal
+ipfs daemon
+```
+The IPFS daemon should be running on http://localhost:5001
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### 2. Configure Ganache
+1. Launch Ganache
+2. Create a new workspace (Ethereum)
+3. Set the following configuration:
+   - Port Number: 7545
+   - Network ID: 1377
+   - Gas Limit: 99999999
+   - Gas Price: 2.5 GWEI
 
-### `npm test`
+### 3. Configure MetaMask
+1. Open MetaMask
+2. Add a new network with these settings:
+   - Network Name: Ganache
+   - RPC URL: http://127.0.0.1:7545
+   - Chain ID: 1377
+   - Currency Symbol: ETH
+3. Import accounts from Ganache using their private keys
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### 4. Install Dependencies
+```bash
+# Install project dependencies
+npm install
 
-### `npm run build`
+# Install Truffle globally if you haven't already
+npm install -g truffle
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+### 5. Deploy Smart Contracts
+```bash
+# From the project root directory
+truffle compile
+truffle migrate --reset
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+### 6. Start the Application
+```bash
+# Start the development server
+npm start
+```
+The application will be available at http://localhost:3000
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Testing the Application
 
-### `npm run eject`
+### 1. Basic Functionality Testing
+1. Log in with different roles:
+   - Admin: Use the first account from Ganache
+   - Doctor: Create a doctor account through Admin dashboard
+   - Patient: Create a patient account through Admin dashboard
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+2. Test file upload:
+   - Log in as a patient
+   - Upload a health record
+   - Verify the file hash appears in the records list
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+### 2. Access Control Testing
+1. Doctor requesting access:
+   - Log in as a doctor
+   - Request access to a patient's records
+   - Verify the request appears in the patient's dashboard
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+2. Patient granting access:
+   - Log in as a patient
+   - View pending access requests
+   - Grant/reject access to doctors
+   - Verify doctors can/cannot view records based on access status
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+### 3. IPFS Verification
+1. After uploading a file:
+   - Note the IPFS hash
+   - Visit http://localhost:8080/ipfs/[YOUR-HASH]
+   - Verify the file is accessible through IPFS
 
-## Learn More
+### Common Issues and Solutions
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+1. **MetaMask Connection Issues**
+   - Ensure you're on the correct network (Ganache)
+   - Reset your account in MetaMask if transactions aren't showing
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+2. **IPFS Upload Failures**
+   - Verify IPFS daemon is running
+   - Check CORS settings: `ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '["*"]'`
 
-### Code Splitting
+3. **Smart Contract Interactions Failing**
+   - Ensure contracts are deployed to Ganache
+   - Check if you have sufficient ETH in your account
+   - Verify you're using the correct account in MetaMask
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+## Development Notes
 
-### Analyzing the Bundle Size
+- Smart contracts are in the `contracts/` directory
+- Frontend React components are in `src/components/`
+- IPFS integration is handled through `src/services/ipfsService.js`
+- Contract artifacts are in `src/contracts/`
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+For any additional help or issues, please contact the development team.
