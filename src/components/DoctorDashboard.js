@@ -23,11 +23,11 @@ const DoctorDashboard = () => {
   const [patients, setPatients] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [tabValue, setTabValue] = useState(0);
-  const [openCommentDialog, setOpenCommentDialog] = useState(false);
-  const [documentComment, setDocumentComment] = useState('');
-  const [selectedDocument, setSelectedDocument] = useState(null);
   const [doctorInfo, setDoctorInfo] = useState(null);
   const [openRequestDialog, setOpenRequestDialog] = useState(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [documentName, setDocumentName] = useState('');
 
   // Fetch doctor's information
   const fetchDoctorInfo = async () => {
@@ -209,232 +209,6 @@ const DoctorDashboard = () => {
     }
   };
 
-  const handleAddComment = async () => {
-    if (!selectedPatient || !selectedDocument || !documentComment.trim()) {
-      setError('Please enter a comment');
-      return;
-    }
-
-    try {
-      setLoading(true);
-
-      // Get current patient data from IPFS
-      const user = await contract.methods.users(selectedPatient.address).call();
-      let patientData = {};
-      if (user.ipfsHash) {
-        const ipfsData = await getFromIPFS(user.ipfsHash);
-        patientData = typeof ipfsData === 'string' ? JSON.parse(ipfsData) : ipfsData;
-      }
-
-      // Add new comment
-      const newComment = {
-        doctorName: doctorInfo.name,
-        doctorAddress: account,
-        timestamp: new Date().toISOString(),
-        content: documentComment
-      };
-
-      // Initialize or update comments for the document
-      if (!patientData.comments) patientData.comments = {};
-      if (!patientData.comments[selectedDocument.ipfsHash]) {
-        patientData.comments[selectedDocument.ipfsHash] = [];
-      }
-      patientData.comments[selectedDocument.ipfsHash].push(newComment);
-
-      // Upload updated data to IPFS
-      const newIpfsHash = await uploadToIPFS(JSON.stringify(patientData));
-
-      // Update user data on blockchain
-      await contract.methods
-        .updateUser(selectedPatient.address, selectedPatient.name, newIpfsHash)
-        .send({ from: account });
-
-      setSuccess('Comment added successfully');
-      setOpenCommentDialog(false);
-      setDocumentComment('');
-      fetchPatients(); // Refresh patient data
-    } catch (error) {
-      console.error('Error adding comment:', error);
-      setError('Failed to add comment');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleTabChange = (event, newValue) => {
-    setTabValue(newValue);
-  };
-
-  const renderPatientList = () => (
-    <TableContainer>
-      <Table>
-        <TableHead>
-          <TableRow>
-            <TableCell>Name</TableCell>
-            <TableCell>Wallet Address</TableCell>
-            <TableCell>Access Status</TableCell>
-            {/* Only show these columns if we have access */}
-            {patients.some(p => p.hasAccess) && (
-              <>
-                <TableCell>Email</TableCell>
-                <TableCell>Blood Group</TableCell>
-                <TableCell>Allergies</TableCell>
-                <TableCell>Documents</TableCell>
-              </>
-            )}
-            <TableCell>Actions</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {patients.map((patient) => (
-            <TableRow key={patient.address}>
-              <TableCell>{patient.name}</TableCell>
-              <TableCell>
-                <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                  {patient.address.slice(0, 6)}...{patient.address.slice(-4)}
-                </Typography>
-              </TableCell>
-              <TableCell>
-                <Chip
-                  label={patient.hasAccess ? "Access Granted" : "No Access"}
-                  color={patient.hasAccess ? "success" : "default"}
-                  size="small"
-                />
-              </TableCell>
-              {/* Only show sensitive data if we have access */}
-              {patients.some(p => p.hasAccess) && (
-                <>
-                  <TableCell>{patient.hasAccess ? patient.email : '***'}</TableCell>
-                  <TableCell>{patient.hasAccess ? patient.bloodGroup : '***'}</TableCell>
-                  <TableCell>{patient.hasAccess ? patient.allergies : '***'}</TableCell>
-                  <TableCell>
-                    {patient.hasAccess ? (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography>{patient.documents?.length || 0}</Typography>
-                        {patient.documents && patient.documents.length > 0 && (
-                          patient.documents.map((doc, index) => (
-                            <Tooltip key={index} title={doc.name || 'Download Document'}>
-                              <IconButton
-                                size="small"
-                                onClick={() => handleDownloadDocument(doc)}
-                                disabled={loading}
-                                color="primary"
-                              >
-                                <Download />
-                              </IconButton>
-                            </Tooltip>
-                          ))
-                        )}
-                      </Box>
-                    ) : (
-                      '***'
-                    )}
-                  </TableCell>
-                </>
-              )}
-              <TableCell>
-                <Tooltip title={patient.hasAccess ? "View Details" : "Request Access Required"}>
-                  <span>
-                    <IconButton
-                      size="small"
-                      onClick={() => setSelectedPatient(patient)}
-                      color="primary"
-                      disabled={!patient.hasAccess}
-                    >
-                      <Visibility />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-                {!patient.hasAccess && (
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={() => handleRequestAccess(patient)}
-                    sx={{ ml: 1 }}
-                  >
-                    Request Access
-                  </Button>
-                )}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-
-  const renderDocumentList = () => (
-    selectedPatient ? (
-      <Grid container spacing={3}>
-        <Grid item xs={12}>
-          <Typography variant="h6" gutterBottom>
-            Documents for {selectedPatient.name}
-          </Typography>
-          <List>
-            {selectedPatient.documents?.map((doc, index) => (
-              <ListItem
-                key={index}
-                secondaryAction={
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Tooltip title="Download">
-                      <IconButton
-                        edge="end"
-                        size="small"
-                        onClick={() => handleDownloadDocument(doc)}
-                        disabled={loading}
-                        color="primary"
-                      >
-                        <Download />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Add Comment">
-                      <IconButton
-                        edge="end"
-                        size="small"
-                        onClick={() => {
-                          setSelectedDocument(doc);
-                          setOpenCommentDialog(true);
-                        }}
-                        color="primary"
-                      >
-                        <Comment />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                }
-              >
-                <ListItemText
-                  primary={doc.name || `Document ${index + 1}`}
-                  secondary={
-                    <Box component="div">
-                      <Box component="div" sx={{ mb: 1 }}>
-                        Uploaded: {new Date(doc.uploadDate).toLocaleDateString()}
-                      </Box>
-                      {selectedPatient.comments?.[doc.ipfsHash]?.map((comment, i) => (
-                        <Box key={i} sx={{ mt: 1, pl: 2, borderLeft: '2px solid #ddd' }}>
-                          <Box component="div" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
-                            {comment.doctorName} - {new Date(comment.timestamp).toLocaleString()}
-                          </Box>
-                          <Box component="div" sx={{ fontSize: '0.875rem' }}>
-                            {comment.content}
-                          </Box>
-                        </Box>
-                      ))}
-                    </Box>
-                  }
-                />
-              </ListItem>
-            ))}
-          </List>
-        </Grid>
-      </Grid>
-    ) : (
-      <Typography variant="body1" color="textSecondary">
-        Please select a patient to view their documents
-      </Typography>
-    )
-  );
-
   const handleRequestAccess = async (patient) => {
     if (!contract || !account) return;
 
@@ -454,6 +228,103 @@ const DoctorDashboard = () => {
 
   const handleRequestSubmitted = () => {
     fetchPatients(); // Reload the patient list to update access status
+  };
+
+  const handleFileSelect = (event) => {
+    const file = event.target.files[0];
+    if (file && file.type === 'application/pdf') {
+      setSelectedFile(file);
+      setDocumentName(file.name);
+    } else {
+      setError('Please select a PDF file');
+      setSelectedFile(null);
+    }
+  };
+
+  const handleUploadDocument = async () => {
+    setLoading(true);
+    setError('');
+
+    if (!contract) {
+      setError('Contract is not initialized');
+      setLoading(false);
+      return;
+    }
+
+    if (!contract.methods) {
+      setError('Contract methods are not available');
+      setLoading(false);
+      return;
+    }
+
+    if (!selectedPatient || !selectedPatient.address) {
+      setError('No patient selected or invalid patient address');
+      setLoading(false);
+      return;
+    }
+
+    console.log('Contract address:', contract._address);
+    console.log('Selected patient:', selectedPatient);
+    console.log('Account:', account);
+
+    try {
+      // Read file as array buffer
+      const buffer = await selectedFile.arrayBuffer();
+      
+      // Upload to IPFS
+      const ipfsHash = await uploadToIPFS(new Uint8Array(buffer));
+      console.log('IPFS Hash:', ipfsHash);
+
+      // Prepare transaction parameters
+      const methodCall = contract.methods.addDocument(
+        selectedPatient.address,
+        documentName,
+        ipfsHash
+      );
+
+      // Get gas price
+      const gasPrice = await web3.eth.getGasPrice();
+      console.log('Gas Price:', gasPrice);
+
+      // Get gas estimate with higher limit
+      const gas = await methodCall.estimateGas({
+        from: account,
+        gas: 5000000 // Set a higher gas limit for estimation
+      });
+      console.log('Estimated gas:', gas);
+
+      // Send transaction with higher gas limit
+      const result = await methodCall.send({
+        from: account,
+        gas: Math.min(Math.floor(gas * 1.5), 6000000), // Add 50% buffer but cap at 6M
+        gasPrice: gasPrice
+      });
+
+      console.log('Transaction result:', result);
+      setSuccess('Document uploaded successfully');
+      setUploadDialogOpen(false);
+      setSelectedFile(null);
+      setDocumentName('');
+
+      // Refresh patient data
+      await fetchPatients();
+    } catch (err) {
+      console.error('Error uploading document:', err);
+      let errorMessage = err.message || 'Unknown error occurred';
+      
+      // Check for specific error types
+      if (err.code === 4001) {
+        errorMessage = 'Transaction rejected by user';
+      } else if (err.message.includes('gas')) {
+        errorMessage = 'Gas estimation failed. The transaction might fail or the contract might be paused.';
+      } else if (err.message.includes('execution reverted')) {
+        errorMessage = 'Transaction reverted. You might not have the right permissions.';
+      }
+      
+      setError(`Failed to upload document: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -504,6 +375,169 @@ const DoctorDashboard = () => {
     return cleanup;
   }, [contract, account]);
 
+  const renderPatientList = () => (
+    <TableContainer>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>Name</TableCell>
+            <TableCell>Wallet Address</TableCell>
+            <TableCell>Access Status</TableCell>
+            {/* Only show these columns if we have access */}
+            {patients.some(p => p.hasAccess) && (
+              <>
+                <TableCell>Email</TableCell>
+                <TableCell>Phone</TableCell>
+                <TableCell>Blood Group</TableCell>
+                <TableCell>Date of Birth</TableCell>
+                <TableCell>Allergies</TableCell>
+              </>
+            )}
+            <TableCell>Actions</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {patients.map((patient) => (
+            <TableRow key={patient.address}>
+              <TableCell>{patient.name}</TableCell>
+              <TableCell>
+                <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                  {patient.address.slice(0, 6)}...{patient.address.slice(-4)}
+                </Typography>
+              </TableCell>
+              <TableCell>
+                <Chip
+                  label={patient.hasAccess ? "Access Granted" : "No Access"}
+                  color={patient.hasAccess ? "success" : "default"}
+                  size="small"
+                />
+              </TableCell>
+              {/* Only show sensitive data if we have access */}
+              {patients.some(p => p.hasAccess) && (
+                <>
+                  <TableCell>{patient.hasAccess ? patient.email : '***'}</TableCell>
+                  <TableCell>{patient.hasAccess ? patient.phone : '***'}</TableCell>
+                  <TableCell>{patient.hasAccess ? patient.bloodGroup : '***'}</TableCell>
+                  <TableCell>
+                    {patient.hasAccess && patient.dateOfBirth 
+                      ? new Date(patient.dateOfBirth).toLocaleDateString() 
+                      : '***'}
+                  </TableCell>
+                  <TableCell>{patient.hasAccess ? patient.allergies : '***'}</TableCell>
+                 
+                </>
+              )}
+              <TableCell>
+                <Tooltip title={patient.hasAccess ? "View Details" : "Request Access Required"}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        setSelectedPatient(patient);
+                        setTabValue(1); // Switch to Patient Details tab
+                      }}
+                      color="primary"
+                      disabled={!patient.hasAccess}
+                    >
+                      <Visibility />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                {!patient.hasAccess && (
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => handleRequestAccess(patient)}
+                    sx={{ ml: 1 }}
+                  >
+                    Request Access
+                  </Button>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+
+  const renderDocumentList = () => (
+    selectedPatient ? (
+      <Grid container spacing={3}>
+        <Grid item xs={12}>
+          <Paper sx={{ p: 3, mb: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Patient Information
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle1">Name: {selectedPatient.name}</Typography>
+                <Typography variant="subtitle1">Email: {selectedPatient.email}</Typography>
+                <Typography variant="subtitle1">Phone: {selectedPatient.phone}</Typography>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle1">Blood Group: {selectedPatient.bloodGroup}</Typography>
+                <Typography variant="subtitle1">Date of Birth: {selectedPatient.dateOfBirth ? new Date(selectedPatient.dateOfBirth).toLocaleDateString() : 'N/A'}</Typography>
+                <Typography variant="subtitle1">Allergies: {selectedPatient.allergies || 'None'}</Typography>
+              </Grid>
+            </Grid>
+          </Paper>
+        </Grid>
+        <Grid item xs={12}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">
+              Documents
+            </Typography>
+            <Button
+              variant="contained"
+              startIcon={<Upload />}
+              onClick={() => setUploadDialogOpen(true)}
+              disabled={loading}
+            >
+              Upload Document
+            </Button>
+          </Box>
+          <List>
+            {selectedPatient.documents?.map((doc, index) => (
+              <ListItem
+                key={index}
+                sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', mb: 2 }}
+                secondaryAction={
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Tooltip title="Download">
+                      <IconButton
+                        edge="end"
+                        size="small"
+                        onClick={() => handleDownloadDocument(doc)}
+                        disabled={loading}
+                        color="primary"
+                      >
+                        <Download />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                }
+              >
+                <Box sx={{ width: '100%' }}>
+                  <Typography variant="subtitle1">
+                    {doc.name || `Document ${index + 1}`}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Uploaded: {new Date(doc.uploadDate).toLocaleDateString()}
+                  </Typography>
+                </Box>
+              </ListItem>
+            ))}
+          </List>
+        </Grid>
+      </Grid>
+    ) : (
+      <Typography variant="body1" color="textSecondary">
+        Please select a patient to view their documents
+      </Typography>
+    )
+  );
+
   return (
     <Container maxWidth="lg">
       <Box sx={{ mt: 4, mb: 4 }}>
@@ -519,51 +553,81 @@ const DoctorDashboard = () => {
               <Grid item xs={12} md={6}>
                 <Typography variant="subtitle1">Name: {doctorInfo.name}</Typography>
                 <Typography variant="subtitle1">Address: {account}</Typography>
+                {doctorInfo.specialization && (
+                  <Typography variant="subtitle1">Specialization: {doctorInfo.specialization}</Typography>
+                )}
+                {doctorInfo.hospitalAffiliation && (
+                  <Typography variant="subtitle1">Hospital: {doctorInfo.hospitalAffiliation}</Typography>
+                )}
               </Grid>
             </Grid>
           )}
         </Paper>
 
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-          <Tabs value={tabValue} onChange={handleTabChange}>
+          <Tabs value={tabValue} onChange={(event, newValue) => setTabValue(newValue)}>
             <Tab label="Patients" />
-            <Tab label="Documents" disabled={!selectedPatient} />
+            <Tab label="Patient Details" disabled={!selectedPatient} />
           </Tabs>
         </Box>
 
         {tabValue === 0 && renderPatientList()}
         {tabValue === 1 && renderDocumentList()}
 
-        {/* Comment Dialog */}
-        <Dialog open={openCommentDialog} onClose={() => setOpenCommentDialog(false)}>
-          <DialogTitle>Add Comment</DialogTitle>
+        {/* Upload Document Dialog */}
+        <Dialog
+          open={uploadDialogOpen}
+          onClose={() => {
+            setUploadDialogOpen(false);
+            setSelectedFile(null);
+            setDocumentName('');
+          }}
+        >
+          <DialogTitle>Upload Document</DialogTitle>
           <DialogContent>
-            <TextField
-              autoFocus
-              margin="dense"
-              label="Comment"
-              type="text"
-              fullWidth
-              multiline
-              rows={4}
-              value={documentComment}
-              onChange={(e) => setDocumentComment(e.target.value)}
-            />
+            <Box sx={{ mt: 2 }}>
+              <input
+                accept="application/pdf"
+                style={{ display: 'none' }}
+                id="raised-button-file"
+                type="file"
+                onChange={handleFileSelect}
+              />
+              <label htmlFor="raised-button-file">
+                <Button
+                  variant="outlined"
+                  component="span"
+                  startIcon={<Upload />}
+                  sx={{ mb: 2 }}
+                >
+                  Select PDF File
+                </Button>
+              </label>
+              {selectedFile && (
+                <Typography variant="body2" sx={{ mb: 2 }}>
+                  Selected file: {selectedFile.name}
+                </Typography>
+              )}
+              <TextField
+                fullWidth
+                label="Document Name"
+                value={documentName}
+                onChange={(e) => setDocumentName(e.target.value)}
+                sx={{ mb: 2 }}
+              />
+            </Box>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setOpenCommentDialog(false)}>Cancel</Button>
-            <Button onClick={handleAddComment} variant="contained">
-              Add Comment
+            <Button onClick={() => setUploadDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleUploadDocument}
+              variant="contained"
+              disabled={!selectedFile || !documentName || loading}
+            >
+              Upload
             </Button>
           </DialogActions>
         </Dialog>
-
-        <AccessRequest
-          open={openRequestDialog}
-          onClose={() => setOpenRequestDialog(false)}
-          patientAddress={selectedPatient?.address || ''}
-          onRequest={handleRequestSubmitted}
-        />
       </Box>
     </Container>
   );
