@@ -11,6 +11,8 @@ import PatientDashboard from './components/PatientDashboard';
 import Navbar from './components/Navbar';
 import Help from './components/Help';
 import { useWeb3Context } from './context/Web3Context';
+import Registration from './pages/Registration'; // Add this import
+
 
 const theme = createTheme({
   palette: {
@@ -59,6 +61,7 @@ function App() {
                 </PrivateRoute>
               }
             />
+             <Route path="/register" element={<Registration />} />
             <Route
               path="/doctor"
               element={

@@ -93,7 +93,19 @@ export const Web3Provider = ({ children }) => {
       setLoading(false);
     }
   };
-
+  const initializeContract = async (web3Instance) => {
+    const networkId = await web3Instance.eth.net.getId();
+    const networkData = HealthRecordContract.networks[networkId];
+    
+    if (networkData) {
+      const contractInstance = new web3Instance.eth.Contract(
+        HealthRecordContract.abi,
+        networkData.address
+      );
+      return contractInstance;
+    }
+    throw new Error('Contract not deployed to detected network');
+  };
   const disconnect = () => {
     if (window.ethereum) {
       window.ethereum.removeListener('accountsChanged', handleAccountsChanged);

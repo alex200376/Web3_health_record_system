@@ -230,103 +230,130 @@ const DoctorDashboard = () => {
     fetchPatients(); // Reload the patient list to update access status
   };
 
-  const handleFileSelect = (event) => {
-    const file = event.target.files[0];
-    if (file && file.type === 'application/pdf') {
-      setSelectedFile(file);
-      setDocumentName(file.name);
-    } else {
-      setError('Please select a PDF file');
-      setSelectedFile(null);
-    }
-  };
-
-  const handleUploadDocument = async () => {
-    setLoading(true);
-    setError('');
-
-    if (!contract) {
-      setError('Contract is not initialized');
-      setLoading(false);
-      return;
-    }
-
-    if (!contract.methods) {
-      setError('Contract methods are not available');
-      setLoading(false);
-      return;
-    }
-
-    if (!selectedPatient || !selectedPatient.address) {
-      setError('No patient selected or invalid patient address');
-      setLoading(false);
-      return;
-    }
-
-    console.log('Contract address:', contract._address);
-    console.log('Selected patient:', selectedPatient);
-    console.log('Account:', account);
-
-    try {
-      // Read file as array buffer
-      const buffer = await selectedFile.arrayBuffer();
+    const handleFileSelect = async (event) => {
+      const file = event.target.files[0];
       
-      // Upload to IPFS
-      const ipfsHash = await uploadToIPFS(new Uint8Array(buffer));
-      console.log('IPFS Hash:', ipfsHash);
-
-      // Prepare transaction parameters
-      const methodCall = contract.methods.addDocument(
-        selectedPatient.address,
-        documentName,
-        ipfsHash
-      );
-
-      // Get gas price
-      const gasPrice = await web3.eth.getGasPrice();
-      console.log('Gas Price:', gasPrice);
-
-      // Get gas estimate with higher limit
-      const gas = await methodCall.estimateGas({
-        from: account,
-        gas: 5000000 // Set a higher gas limit for estimation
-      });
-      console.log('Estimated gas:', gas);
-
-      // Send transaction with higher gas limit
-      const result = await methodCall.send({
-        from: account,
-        gas: Math.min(Math.floor(gas * 1.5), 6000000), // Add 50% buffer but cap at 6M
-        gasPrice: gasPrice
-      });
-
-      console.log('Transaction result:', result);
-      setSuccess('Document uploaded successfully');
-      setUploadDialogOpen(false);
-      setSelectedFile(null);
-      setDocumentName('');
-
-      // Refresh patient data
-      await fetchPatients();
-    } catch (err) {
-      console.error('Error uploading document:', err);
-      let errorMessage = err.message || 'Unknown error occurred';
-      
-      // Check for specific error types
-      if (err.code === 4001) {
-        errorMessage = 'Transaction rejected by user';
-      } else if (err.message.includes('gas')) {
-        errorMessage = 'Gas estimation failed. The transaction might fail or the contract might be paused.';
-      } else if (err.message.includes('execution reverted')) {
-        errorMessage = 'Transaction reverted. You might not have the right permissions.';
+      // Validate file type
+      if (!file.type.includes('pdf')) {
+        setError('Only PDF files are allowed');
+        return;
       }
+    
+      // Validate file size (max 10MB)
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        setError('File size must be less than 10MB');
+        return;
+      }
+    
+      try {
+        setLoading(true);
+    
+        // Read file as ArrayBuffer and create blob
+        const arrayBuffer = await file.arrayBuffer();
+        const pdfBlob = new Blob([arrayBuffer], { type: 'application/pdf' });
+    
+        // Create form data with the PDF file
+        const formData = new FormData();
+        formData.append('file', pdfBlob, file.name);
+    
+        // Upload using IPFS API directly
+        const response = await fetch('http://localhost:5001/api/v0/add', {
+          method: 'POST',
+          body: formData
+        });
+    
+        if (!response.ok) {
+          throw new Error('Failed to upload to IPFS');
+        }
+    
+        const result = await response.json();
+        const ipfsHash = result.Hash;
+    
+        // Create document metadata
+        const documentMetadata = {
+          name: file.name,
+          ipfsHash: ipfsHash,
+          type: 'application/pdf',
+          size: file.size,
+          uploadDate: new Date().toISOString()
+        };
+    
+        setSelectedFile(documentMetadata);
+        setDocumentName(file.name);
+        setSuccess('Document ready for upload');
+      } catch (error) {
+        console.error('Error uploading file:', error);
+        setError('Failed to upload document. Please make sure IPFS is running.');
+      } finally {
+        setLoading(false);
+        event.target.value = ''; // Reset file input
+      }
+    };
+    
+           const handleUploadDocument = async () => {
+        if (!selectedFile?.ipfsHash || !documentName || !contract || !selectedPatient?.address) {
+          setError('Please select a file and patient first');
+          return;
+        }
       
-      setError(`Failed to upload document: ${errorMessage}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+        setLoading(true);
+        setError('');
+      
+        try {
+          // Validate access
+          const hasAccess = await contract.methods
+            .doctorAccess(selectedPatient.address, account)
+            .call();
+      
+          if (!hasAccess) {
+            throw new Error('No permission to upload documents for this patient');
+          }
+      
+          // Get current block for gas limit
+          const block = await web3.eth.getBlock('latest');
+          const blockGasLimit = Number(block.gasLimit);
+          const gasLimit = Math.floor(blockGasLimit * 0.9); // 90% of block gas limit
+      
+          // Send transaction with fixed gas limit
+          const tx = await contract.methods
+            .addDocument(
+              selectedPatient.address,
+              documentName,
+              selectedFile.ipfsHash
+            )
+            .send({
+              from: account,
+              gas: gasLimit // Use fixed gas limit
+            });
+      
+          if (!tx.status) {
+            throw new Error('Transaction failed');
+          }
+      
+          setSelectedPatient(prev => ({
+            ...prev,
+            documents: [...(prev.documents || []), selectedFile]
+          }));
+      
+          setSuccess('Document uploaded successfully');
+          setUploadDialogOpen(false);
+          setSelectedFile(null);
+          setDocumentName('');
+          await fetchPatients();
+      
+        } catch (err) {
+          console.error('Error uploading document:', err);
+          setError(
+            err.message.includes('permission') ? 'No permission to upload' :
+            err.message.includes('gas') ? 'Transaction failed - check gas settings' :
+            'Upload failed - please try again'
+          );
+        } finally {
+          setLoading(false);
+        }
+      };
+  // Remove handleFileUpload as it's now combined with handleFileSelect
   useEffect(() => {
     if (!contract || !account) return;
 

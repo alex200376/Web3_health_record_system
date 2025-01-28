@@ -22,6 +22,7 @@ import SecurityIcon from '@mui/icons-material/Security';
 import StorageIcon from '@mui/icons-material/Storage';
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
 import { useWeb3Context } from '../context/Web3Context';
+import { Link as RouterLink } from 'react-router-dom'; // Add this import
 
 const ConnectWallet = () => {
   const { connectWallet, account, error: web3Error, loading } = useWeb3Context();
@@ -295,6 +296,23 @@ const ConnectWallet = () => {
                   {' '}or contact our support team.
                 </Typography>
               </Box>
+              <Box sx={{ mt: 3, textAlign: 'center' }}>
+  <Button
+    variant="outlined"
+    component={RouterLink}  // Change to RouterLink
+    to="/register"
+    disabled={loading}
+    sx={{
+      py: 1.5,
+      px: 4,
+      '&:hover': {
+        bgcolor: 'rgba(25, 118, 210, 0.04)'
+      }
+    }}
+  >
+    Register as Patient
+  </Button>
+</Box>
             </Paper>
           </Grid>
         </Grid>
