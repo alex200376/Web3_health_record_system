@@ -24,7 +24,7 @@ The IPFS daemon should be running on http://localhost:5001
 2. Create a new workspace (Ethereum)
 3. Set the following configuration:
    - Port Number: 7545
-   - Network ID: 1377
+   - Network ID: 1337
    - Gas Limit: 99999999
    - Gas Price: 2.5 GWEI
 
@@ -33,7 +33,7 @@ The IPFS daemon should be running on http://localhost:5001
 2. Add a new network with these settings:
    - Network Name: Ganache
    - RPC URL: http://127.0.0.1:7545
-   - Chain ID: 1377
+   - Chain ID: 1337
    - Currency Symbol: ETH
 3. Import accounts from Ganache using their private keys
 
