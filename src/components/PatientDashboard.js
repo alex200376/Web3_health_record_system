@@ -13,7 +13,7 @@ import {
   Tabs,
 } from '@mui/material';
 import {
-  Download, Visibility, Close
+  Download, Visibility, Close, Delete
 } from '@mui/icons-material';
 import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -62,24 +62,64 @@ const PatientDashboard = () => {
   };
 
   const fetchDocuments = async () => {
-    if (!contract || !account) return;
+    if (!contract || !account) {
+      console.log('Contract or account not initialized');
+      return;
+    }
 
     try {
       setLoading(true);
+      console.log('Fetching documents for account:', account);
+
+      // Check if user exists first
       const userData = await contract.methods.users(account).call();
-      
-      if (userData.ipfsHash) {
-        const ipfsData = await getFromIPFS(userData.ipfsHash);
-        const parsedData = typeof ipfsData === 'string' ? JSON.parse(ipfsData) : ipfsData;
-        setDocuments(parsedData.documents || []);
+      if (!userData.isActive) {
+        console.log('User not found or inactive');
+        setDocuments([]);
+        return;
       }
+
+      // Get documents from blockchain with error handling
+      const docs = await contract.methods.getDocuments(account).call({
+        from: account,
+        gas: 3000000 // Explicitly set gas limit
+      });
+      
+      console.log('Raw documents:', docs);
+
+      // Format the documents with additional error checking
+      const formattedDocs = docs.map(doc => ({
+        name: doc.name || 'Untitled Document',
+        ipfsHash: doc.ipfsHash,
+        uploadDate: doc.timestamp ? new Date(Number(doc.timestamp) * 1000).toISOString() : new Date().toISOString(),
+        uploadedBy: doc.uploadedBy || account,
+        type: 'application/pdf'
+      }));
+
+      console.log('Formatted documents:', formattedDocs);
+      setDocuments(formattedDocs);
+
     } catch (error) {
-      console.error('Error fetching documents:', error);
-      setError('Failed to fetch documents');
+      console.error('Error details:', error);
+      if (error.message.includes('revert')) {
+        setError('Smart contract error: Operation not allowed');
+      } else if (error.message.includes('gas')) {
+        setError('Transaction error: Please try again with higher gas limit');
+      } else {
+        setError('Failed to fetch documents: ' + error.message);
+      }
+      setDocuments([]); // Reset documents on error
     } finally {
       setLoading(false);
     }
   };
+
+  // Add an effect to refetch documents when account changes
+  useEffect(() => {
+    if (contract && account) {
+      fetchDocuments();
+    }
+  }, [contract, account]);
 
   const downloadDocument = async (doc) => {
     try {
@@ -127,6 +167,23 @@ const PatientDashboard = () => {
     }
   };
 
+  const handleDeleteDocument = async (doc) => {
+    if (!contract || !account) return;
+
+    try {
+      setLoading(true);
+      await contract.methods.removeDocument(account, doc.ipfsHash)
+        .send({ from: account });
+      setSuccess('Document deleted successfully');
+      fetchDocuments(); // Refresh the list
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      setError('Failed to delete document: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
   };
@@ -146,8 +203,8 @@ const PatientDashboard = () => {
           <TableRow>
             <TableCell>Name</TableCell>
             <TableCell>Upload Date</TableCell>
+            <TableCell>Uploaded By</TableCell>
             <TableCell>Type</TableCell>
-            <TableCell>Size</TableCell>
             <TableCell>Actions</TableCell>
           </TableRow>
         </TableHead>
@@ -156,8 +213,13 @@ const PatientDashboard = () => {
             <TableRow key={index}>
               <TableCell>{doc.name}</TableCell>
               <TableCell>{new Date(doc.uploadDate).toLocaleDateString()}</TableCell>
-              <TableCell>{doc.type}</TableCell>
-              <TableCell>{Math.round(doc.size / 1024)} KB</TableCell>
+              <TableCell>
+                {doc.uploadedBy?.toLowerCase() === account?.toLowerCase() ? 
+                  'You' : 
+                  `${doc.uploadedBy?.slice(0, 6)}...${doc.uploadedBy?.slice(-4)}`
+                }
+              </TableCell>
+              <TableCell>Medical Document</TableCell>
               <TableCell>
                 <Tooltip title="View">
                   <IconButton onClick={() => viewDocument(doc)}>
@@ -169,9 +231,23 @@ const PatientDashboard = () => {
                     <Download />
                   </IconButton>
                 </Tooltip>
+                {doc.uploadedBy?.toLowerCase() === account?.toLowerCase() && (
+                  <Tooltip title="Delete">
+                    <IconButton onClick={() => handleDeleteDocument(doc)} color="error">
+                      <Delete />
+                    </IconButton>
+                  </Tooltip>
+                )}
               </TableCell>
             </TableRow>
           ))}
+          {documents.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5} align="center">
+                No documents available
+              </TableCell>
+            </TableRow>
+          )}
         </TableBody>
       </Table>
     </TableContainer>

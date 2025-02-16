@@ -666,7 +666,26 @@ const AdminDashboard = () => {
         throw new Error('User does not exist or is already inactive');
       }
 
-      // If deleting a patient, clean up their access states first
+      // If deleting a patient, clean up their files first
+      if (user.role === '0' && userToDelete.documents && userToDelete.documents.length > 0) {
+        console.log('Cleaning up files for patient:', userToDelete.address);
+        
+        // Attempt to unpin each document from IPFS
+        for (const doc of userToDelete.documents) {
+          try {
+            // Unpin the file from IPFS
+            await fetch(`http://localhost:5001/api/v0/pin/rm?arg=${doc.ipfsHash}`, {
+              method: 'POST',
+            });
+            console.log(`Unpinned document: ${doc.ipfsHash}`);
+          } catch (error) {
+            console.error(`Failed to unpin document: ${doc.ipfsHash}`, error);
+            // Continue with deletion even if unpinning fails
+          }
+        }
+      }
+
+      // Clean up access states for patients
       if (user.role === '0') {
         try {
           // Get all authorized doctors and pending requests
@@ -707,7 +726,7 @@ const AdminDashboard = () => {
       await contract.methods.deleteUser(userToDelete.address)
         .send({ from: account });
 
-      setSuccess('User deleted successfully!');
+      setSuccess('User and associated files deleted successfully!');
       handleCloseDeleteModal();
       fetchUsers();
     } catch (err) {

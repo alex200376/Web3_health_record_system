@@ -28,6 +28,8 @@ const DoctorDashboard = () => {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [documentName, setDocumentName] = useState('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [documentToDelete, setDocumentToDelete] = useState(null);
 
   // Fetch doctor's information
   const fetchDoctorInfo = async () => {
@@ -139,6 +141,21 @@ const DoctorDashboard = () => {
               const ipfsData = await getFromIPFS(user.ipfsHash);
               const additionalData = typeof ipfsData === 'string' ? JSON.parse(ipfsData) : ipfsData;
               Object.assign(patientData, additionalData);
+
+              // Fetch documents for this patient
+              try {
+                const documents = await contract.methods.getDocuments(address).call({ from: account });
+                const formattedDocuments = documents.map(doc => ({
+                  name: doc.name,
+                  ipfsHash: doc.ipfsHash,
+                  uploadDate: new Date(Number(doc.timestamp) * 1000).toISOString(),
+                  uploadedBy: doc.uploadedBy
+                }));
+                patientData.documents = formattedDocuments;
+              } catch (error) {
+                console.error('Error fetching documents for patient:', address, error);
+                patientData.documents = [];
+              }
             } catch (error) {
               console.error('Error fetching IPFS data for patient:', address, error);
             }
@@ -310,11 +327,6 @@ const DoctorDashboard = () => {
             throw new Error('No permission to upload documents for this patient');
           }
       
-          // Get current block for gas limit
-          const block = await web3.eth.getBlock('latest');
-          const blockGasLimit = Number(block.gasLimit);
-          const gasLimit = Math.floor(blockGasLimit * 0.9); // 90% of block gas limit
-      
           // Send transaction with fixed gas limit
           const tx = await contract.methods
             .addDocument(
@@ -323,17 +335,24 @@ const DoctorDashboard = () => {
               selectedFile.ipfsHash
             )
             .send({
-              from: account,
-              gas: gasLimit // Use fixed gas limit
+              from: account
             });
       
           if (!tx.status) {
             throw new Error('Transaction failed');
           }
       
+          // Update the local state with the new document
+          const newDocument = {
+            name: documentName,
+            ipfsHash: selectedFile.ipfsHash,
+            uploadDate: new Date().toISOString(),
+            uploadedBy: account
+          };
+      
           setSelectedPatient(prev => ({
             ...prev,
-            documents: [...(prev.documents || []), selectedFile]
+            documents: [...(prev.documents || []), newDocument]
           }));
       
           setSuccess('Document uploaded successfully');
@@ -401,6 +420,65 @@ const DoctorDashboard = () => {
     // Cleanup on unmount
     return cleanup;
   }, [contract, account]);
+
+  const handleDeleteDocument = async (doc) => {
+    if (!doc || !doc.ipfsHash || !selectedPatient?.address) {
+      setError('Invalid document data');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // Try to unpin from IPFS but don't block on failure
+      try {
+        const unpinResponse = await fetch(`http://localhost:5001/api/v0/pin/rm?arg=${doc.ipfsHash}`, {
+          method: 'POST',
+        });
+        
+        if (unpinResponse.ok) {
+          console.log(`Unpinned document: ${doc.ipfsHash}`);
+        } else {
+          console.warn('IPFS unpin failed but continuing with blockchain removal');
+        }
+      } catch (error) {
+        console.warn('IPFS unpin failed but continuing with blockchain removal:', error);
+      }
+
+      // Remove document from blockchain with explicit gas settings
+      const tx = await contract.methods
+        .removeDocument(selectedPatient.address, doc.ipfsHash)
+        .send({ 
+          from: account,
+          gas: 200000 // Explicit gas limit
+        });
+
+      if (!tx.status) {
+        throw new Error('Transaction failed');
+      }
+
+      // Update local state
+      setSelectedPatient(prev => ({
+        ...prev,
+        documents: prev.documents.filter(d => d.ipfsHash !== doc.ipfsHash)
+      }));
+
+      setSuccess('Document deleted successfully');
+      setDeleteDialogOpen(false);
+      setDocumentToDelete(null);
+      await fetchPatients(); // Refresh the list
+
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      setError(
+        error.message.includes('gas') ? 'Transaction failed - please try again with higher gas limit' :
+        error.message.includes('Only the uploading') ? 'Only the doctor who uploaded this document can delete it' :
+        'Failed to delete document. Please try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const renderPatientList = () => (
     <TableContainer>
@@ -542,6 +620,22 @@ const DoctorDashboard = () => {
                         <Download />
                       </IconButton>
                     </Tooltip>
+                    {doc.uploadedBy?.toLowerCase() === account?.toLowerCase() && (
+                      <Tooltip title="Delete">
+                        <IconButton
+                          edge="end"
+                          size="small"
+                          onClick={() => {
+                            setDocumentToDelete(doc);
+                            setDeleteDialogOpen(true);
+                          }}
+                          disabled={loading}
+                          color="error"
+                        >
+                          <Delete />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </Box>
                 }
               >
@@ -652,6 +746,56 @@ const DoctorDashboard = () => {
               disabled={!selectedFile || !documentName || loading}
             >
               Upload
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Delete Document Dialog */}
+        <Dialog
+          open={deleteDialogOpen}
+          onClose={() => {
+            setDeleteDialogOpen(false);
+            setDocumentToDelete(null);
+          }}
+        >
+          <DialogTitle>Confirm Delete Document</DialogTitle>
+          <DialogContent>
+            <Box sx={{ mt: 2 }}>
+              <Typography>
+                Are you sure you want to delete this document?
+              </Typography>
+              {documentToDelete && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Name: {documentToDelete.name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Upload Date: {new Date(documentToDelete.uploadDate).toLocaleDateString()}
+                  </Typography>
+                </Box>
+              )}
+              {error && (
+                <Alert severity="error" sx={{ mt: 2 }}>
+                  {error}
+                </Alert>
+              )}
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button 
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => handleDeleteDocument(documentToDelete)}
+              variant="contained"
+              color="error"
+              disabled={loading}
+              startIcon={loading ? <CircularProgress size={20} /> : null}
+            >
+              {loading ? 'Deleting...' : 'Delete Document'}
             </Button>
           </DialogActions>
         </Dialog>
